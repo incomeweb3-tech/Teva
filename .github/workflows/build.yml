@@ -50,8 +50,13 @@ jobs:
 
       - run: flutter pub get
 
-      - name: Build debug APK
-        run: flutter build apk --debug
+      - name: Build release APK (small, per CPU)
+        run: flutter build apk --release --split-per-abi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: teva-apk
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 
       - name: Build release AAB
         continue-on-error: true
@@ -59,8 +64,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: teva-build
+          name: teva-aab
           if-no-files-found: warn
-          path: |
-            build/app/outputs/flutter-apk/app-debug.apk
-            build/app/outputs/bundle/release/app-release.aab
+          path: build/app/outputs/bundle/release/app-release.aab
