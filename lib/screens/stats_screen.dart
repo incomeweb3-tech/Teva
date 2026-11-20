@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/wallet.dart';
+import '../services/theme_controller.dart';
 
 class StatsScreen extends StatelessWidget {
   const StatsScreen({super.key});
@@ -12,7 +13,7 @@ class StatsScreen extends StatelessWidget {
         final w = Wallet.instance;
         Widget row(String a, String b) => Card(
               elevation: 0,
-              color: Colors.white,
+              color: cardColor(context),
               child: ListTile(
                 title: Text(a),
                 trailing: Text(b,
