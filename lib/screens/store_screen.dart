@@ -34,27 +34,16 @@ class StoreScreen extends StatelessWidget {
                   final id = ids[i];
                   final amount = kDiamondPackages[id]!;
                   final p = b.products[id];
-                  final bonus = amount % 100 == 10 || amount == 60;
                   return Container(
                     decoration: BoxDecoration(
-                      color: bonus ? c.primaryContainer : Colors.white,
+                      color: Colors.white,
                       borderRadius: BorderRadius.circular(28),
-                      border: bonus
-                          ? Border.all(color: c.primary, width: 2)
-                          : null,
                     ),
                     padding: const EdgeInsets.all(12),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Align(
-                          alignment: Alignment.topCenter,
-                          child: bonus
-                              ? const Chip(
-                                  label: Text('Bonus +10'),
-                                  visualDensity: VisualDensity.compact)
-                              : const SizedBox(height: 32),
-                        ),
+                        const SizedBox(height: 32),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
