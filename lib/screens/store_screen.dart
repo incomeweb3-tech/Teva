@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/billing_service.dart';
+import '../services/theme_controller.dart';
 
 class StoreScreen extends StatelessWidget {
   const StoreScreen({super.key});
@@ -36,7 +37,7 @@ class StoreScreen extends StatelessWidget {
                   final p = b.products[id];
                   return Container(
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: cardColor(context),
                       borderRadius: BorderRadius.circular(28),
                     ),
                     padding: const EdgeInsets.all(12),
