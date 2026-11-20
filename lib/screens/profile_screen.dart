@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/wallet.dart';
+import '../services/theme_controller.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -31,18 +32,18 @@ class ProfileScreen extends StatelessWidget {
               ]),
             ),
             const SizedBox(height: 16),
-            _tile(Icons.card_giftcard, 'Daily Rewards',
+            _tile(context, Icons.card_giftcard, 'Daily Rewards',
                 w.canClaimDaily
                     ? 'Claim today\'s reward (7-day streak)'
                     : 'Come back tomorrow! Streak: ${w.streak}/7', () {
               final r = w.claimDaily();
               _snack(context, r > 0 ? '+$r diamonds!' : 'Already claimed today');
             }),
-            _tile(Icons.group, 'Referrals', 'Coming soon', () {
+            _tile(context, Icons.group, 'Referrals', 'Coming soon', () {
               _snack(context, 'Referrals will be added soon');
             }),
-            _tile(Icons.workspace_premium, 'Buy Badge', '100 Diamonds per badge',
-                () {
+            _tile(context, Icons.workspace_premium, 'Buy Badge',
+                '100 Diamonds per badge', () {
               if (w.diamonds < 100) {
                 _snack(context, 'Not enough diamonds');
               } else {
@@ -51,6 +52,7 @@ class ProfileScreen extends StatelessWidget {
               }
             }),
             _tile(
+                context,
                 Icons.verified,
                 'Premium Badge',
                 w.premiumBadge
@@ -64,7 +66,7 @@ class ProfileScreen extends StatelessWidget {
                 _snack(context, 'Premium badge unlocked!');
               }
             }),
-            _tile(Icons.attach_money, 'Purchase History',
+            _tile(context, Icons.attach_money, 'Purchase History',
                 'See all your purchase records', () {
               Navigator.push(
                   context,
@@ -77,9 +79,11 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _tile(IconData i, String t, String s, VoidCallback f) => Card(
+  Widget _tile(BuildContext context, IconData i, String t, String s,
+          VoidCallback f) =>
+      Card(
         elevation: 0,
-        color: Colors.white,
+        color: cardColor(context),
         margin: const EdgeInsets.only(bottom: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: ListTile(
