@@ -24,6 +24,16 @@ jobs:
       - name: Create Android platform files
         run: flutter create . --platforms=android --org com.incomeweb3 --project-name teva
 
+      - name: Turn off Android cloud backup (reinstall = fresh UID)
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          if grep -q 'android:allowBackup' "$M"; then
+            sed -i 's/android:allowBackup="[^"]*"/android:allowBackup="false"/' "$M"
+          else
+            sed -i 's/<application/<application android:allowBackup="false"/' "$M"
+          fi
+          grep -n 'allowBackup' "$M"
+
       - name: Disable release lint (avoids lint crash)
         run: |
           if [ -f android/app/build.gradle.kts ]; then
