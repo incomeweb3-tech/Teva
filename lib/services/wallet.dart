@@ -1,5 +1,10 @@
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'planes.dart';
+
+/// Number of levels in the game.
+const int kLevelCount = 20;
 
 /// Holds diamonds, badges and stats.
 ///
@@ -22,6 +27,14 @@ class Wallet extends ChangeNotifier {
   String lastDaily = '';
   List<String> history = [];
 
+  /// Random player id. It is created on first launch and is stored on the
+  /// phone only, so uninstalling and reinstalling the app gives a new one.
+  String uid = '';
+  int unlockedLevel = 1;
+  List<int> levelStars = List.filled(kLevelCount + 1, 0); // index 1..20
+  Set<int> ownedPlanes = {0};
+  int selectedPlane = 0;
+
   Future<void> load() async {
     _p = await SharedPreferences.getInstance();
     diamonds = _p.getInt('diamonds') ?? 0;
@@ -33,6 +46,27 @@ class Wallet extends ChangeNotifier {
     premiumBadge = _p.getBool('premiumBadge') ?? false;
     lastDaily = _p.getString('lastDaily') ?? '';
     history = _p.getStringList('history') ?? [];
+
+    uid = _p.getString('uid') ?? '';
+    if (uid.isEmpty) {
+      final r = Random.secure();
+      uid = '${1 + r.nextInt(9)}${List.generate(7, (_) => r.nextInt(10)).join()}';
+      _p.setString('uid', uid);
+    }
+    unlockedLevel =
+        (_p.getInt('unlockedLevel') ?? 1).clamp(1, kLevelCount).toInt();
+    levelStars = List.filled(kLevelCount + 1, 0);
+    final st = (_p.getString('levelStars') ?? '').split(',');
+    for (int i = 0; i < st.length && i < levelStars.length; i++) {
+      levelStars[i] = int.tryParse(st[i]) ?? 0;
+    }
+    final owned = _p.getStringList('ownedPlanes');
+    ownedPlanes = owned == null
+        ? {0}
+        : owned.map((e) => int.tryParse(e) ?? 0).toSet();
+    ownedPlanes.add(0);
+    selectedPlane = _p.getInt('selectedPlane') ?? 0;
+    if (!ownedPlanes.contains(selectedPlane)) selectedPlane = 0;
   }
 
   void _save() {
@@ -45,6 +79,10 @@ class Wallet extends ChangeNotifier {
     _p.setBool('premiumBadge', premiumBadge);
     _p.setString('lastDaily', lastDaily);
     _p.setStringList('history', history);
+    _p.setInt('unlockedLevel', unlockedLevel);
+    _p.setString('levelStars', levelStars.join(','));
+    _p.setStringList('ownedPlanes', ownedPlanes.map((e) => '$e').toList());
+    _p.setInt('selectedPlane', selectedPlane);
     notifyListeners();
   }
 
@@ -74,10 +112,40 @@ class Wallet extends ChangeNotifier {
     }
   }
 
-  void finishGame(int score, int reward) {
+  /// Called once when a level ends (won or lost).
+  void finishLevel({
+    required int level,
+    required int score,
+    required int reward,
+    required bool won,
+    required int stars,
+  }) {
     gamesPlayed += 1;
     if (score > highScore) highScore = score;
     diamonds += reward;
+    if (won) {
+      if (stars > levelStars[level]) levelStars[level] = stars;
+      if (level >= unlockedLevel && level < kLevelCount) {
+        unlockedLevel = level + 1;
+      }
+    }
+    _save();
+  }
+
+  /// Buys a plane with diamonds and selects it. Returns false if it fails.
+  bool buyPlane(int id) {
+    if (id < 0 || id >= kPlanes.length) return false;
+    if (ownedPlanes.contains(id)) return false;
+    if (!spend(kPlanes[id].price)) return false;
+    ownedPlanes.add(id);
+    selectedPlane = id;
+    _save();
+    return true;
+  }
+
+  void selectPlane(int id) {
+    if (!ownedPlanes.contains(id)) return;
+    selectedPlane = id;
     _save();
   }
 
