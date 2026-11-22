@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../services/wallet.dart';
 import '../services/theme_controller.dart';
+import '../services/planes.dart';
 
-/// Sky Combat: 2D air shooter.
+/// Sky Combat: 2D air shooter with 20 levels.
 /// Drag to fly (auto-fire), hold FIRE for rapid fire, missiles and shield.
+/// Every level is a few waves; clear all waves to win and unlock the next
+/// level. Higher levels have faster, tougher enemies that shoot more.
 /// Reward per run is capped at 20 diamonds (anti-abuse).
 
 const double kW = 400; // world width (height depends on screen)
@@ -69,6 +72,15 @@ class _Cloud {
 }
 
 class _CombatGame extends ChangeNotifier {
+  final int level;
+  final PlaneDef plane;
+  final int maxHp;
+  final int maxMissiles;
+  final int totalWaves;
+  int revivesLeft;
+  bool won = false;
+  int stars = 0;
+
   final _rng = Random();
   double worldH = 800;
   bool ready = false;
@@ -77,10 +89,10 @@ class _CombatGame extends ChangeNotifier {
 
   double px = 200;
   double py = 640;
-  int hp = 100;
+  int hp;
   double invuln = 0;
   double shieldLeft = 0;
-  int missiles = 3;
+  int missiles;
   int shields = 2;
   bool firing = false;
   double fireT = 0;
@@ -104,7 +116,13 @@ class _CombatGame extends ChangeNotifier {
   final List<_Pick> picks = [];
   final List<_Cloud> clouds = [];
 
-  _CombatGame() {
+  _CombatGame(this.level, this.plane)
+      : maxHp = plane.maxHp,
+        hp = plane.maxHp,
+        missiles = plane.missiles,
+        maxMissiles = plane.missiles + 2,
+        revivesLeft = plane.revives,
+        totalWaves = 3 + level ~/ 4 {
     for (int i = 0; i < 9; i++) {
       clouds.add(_Cloud(_rng.nextDouble() * kW, _rng.nextDouble() * 1000,
           0.7 + _rng.nextDouble() * 0.7, 30 + _rng.nextDouble() * 40));
@@ -127,20 +145,33 @@ class _CombatGame extends ChangeNotifier {
     }
   }
 
+  // ---- difficulty (grows with the level) ----
+  double get _speedMul => 1 + 0.04 * (level - 1);
+  double get _shootMul => max(0.5, 1 - 0.03 * (level - 1));
+  double get _bulletMul => 1 + 0.02 * (level - 1);
+  double get _gruntHp => (2 + level ~/ 8).toDouble();
+  double get _fastHp => (1 + level ~/ 10).toDouble();
+  double get _heavyHp => (5 + level ~/ 3).toDouble();
+
+  bool get _bossLevel => level % 5 == 0;
+
   void _startWave() {
     queue.clear();
-    if (wave % 5 == 0) {
+    final last = wave == totalWaves;
+    if (last && _bossLevel) {
       queue.add(_Kind.boss);
-      for (int i = 0; i < 4; i++) {
+      final n = 2 + level ~/ 5;
+      for (int i = 0; i < n; i++) {
         queue.add(_Kind.grunt);
       }
     } else {
-      final n = 4 + wave * 2;
+      final n = 3 + level ~/ 2 + wave;
+      final heavyP = level >= 3 ? min(0.3, 0.05 + level * 0.015) : 0.0;
       for (int i = 0; i < n; i++) {
         final r = _rng.nextDouble();
-        if (wave >= 3 && r < 0.2) {
+        if (r < heavyP) {
           queue.add(_Kind.heavy);
-        } else if (r < 0.45) {
+        } else if (r < heavyP + 0.25) {
           queue.add(_Kind.fast);
         } else {
           queue.add(_Kind.grunt);
@@ -148,7 +179,7 @@ class _CombatGame extends ChangeNotifier {
       }
     }
     banner = 1.8;
-    bannerText = wave % 5 == 0 ? 'BOSS WAVE $wave' : 'WAVE $wave';
+    bannerText = last ? (_bossLevel ? 'BOSS WAVE' : 'FINAL WAVE') : 'WAVE $wave';
     spawnT = 1.8;
     clearT = 0;
   }
@@ -158,18 +189,21 @@ class _CombatGame extends ChangeNotifier {
     final ph = _rng.nextDouble() * 6;
     switch (kind) {
       case _Kind.grunt:
-        enemies.add(_Enemy(kind, x, -40, 2, 26, 90 + wave * 4.0, ph,
-            1.0 + _rng.nextDouble() * 2));
+        enemies.add(_Enemy(kind, x, -40, _gruntHp, 26,
+            (90 + wave * 4.0) * _speedMul, ph,
+            (1.0 + _rng.nextDouble() * 2) * _shootMul));
         break;
       case _Kind.fast:
-        enemies.add(_Enemy(kind, x, -40, 1, 22, 150 + wave * 5.0, ph, 99));
+        enemies.add(_Enemy(kind, x, -40, _fastHp, 22,
+            (150 + wave * 5.0) * _speedMul, ph, 99));
         break;
       case _Kind.heavy:
-        enemies.add(_Enemy(
-            kind, x, -50, 5, 34, 60, ph, 1.5 + _rng.nextDouble() * 1.5));
+        enemies.add(_Enemy(kind, x, -50, _heavyHp, 34, 60 * _speedMul, ph,
+            (1.5 + _rng.nextDouble() * 1.5) * _shootMul));
         break;
       case _Kind.boss:
-        enemies.add(_Enemy(kind, kW / 2, -120, 50.0 + wave * 5, 70, 70, ph, 2));
+        enemies.add(
+            _Enemy(kind, kW / 2, -120, 40.0 + level * 6, 70, 70, ph, 2));
         break;
     }
   }
@@ -177,11 +211,36 @@ class _CombatGame extends ChangeNotifier {
   void _waveCleared() {
     final w = wave;
     score += 200 * w;
-    hp = min(100, hp + 15);
-    if (w % 2 == 0) missiles = min(5, missiles + 1);
+    if (w >= totalWaves) {
+      _finish(true);
+      return;
+    }
+    hp = min(maxHp, hp + 15);
+    if (w % 2 == 0) missiles = min(maxMissiles, missiles + 1);
     if (w % 3 == 0) shields = min(3, shields + 1);
     wave++;
     _startWave();
+  }
+
+  /// Ends the level once (win or lose) and saves progress.
+  void _finish(bool win) {
+    if (over) return;
+    over = true;
+    won = win;
+    if (win) {
+      score += 300 * level;
+      final pct = hp / maxHp;
+      stars = pct >= 0.7 ? 3 : (pct >= 0.4 ? 2 : 1);
+      reward = min(20, collected + 5 + level ~/ 2);
+    } else {
+      reward = min(20, collected);
+    }
+    if (!_saved) {
+      _saved = true;
+      Wallet.instance.finishLevel(
+          level: level, score: score, reward: reward, won: win, stars: stars);
+    }
+    notifyListeners();
   }
 
   // ---- controls ----
@@ -216,12 +275,17 @@ class _CombatGame extends ChangeNotifier {
     invuln = 0.7;
     fx.add(_Fx(px, py, 0.3, 18));
     if (hp <= 0) {
-      hp = 0;
-      over = true;
-      reward = min(20, collected + (wave - 1));
-      if (!_saved) {
-        _saved = true;
-        Wallet.instance.finishGame(score, reward);
+      if (revivesLeft > 0) {
+        revivesLeft--;
+        hp = (maxHp * 0.5).round();
+        invuln = 2.5;
+        shieldLeft = 2;
+        fx.add(_Fx(px, py, 0.8, 70));
+        banner = 1.2;
+        bannerText = 'REVIVED!';
+      } else {
+        hp = 0;
+        _finish(false);
       }
     }
   }
@@ -262,25 +326,29 @@ class _CombatGame extends ChangeNotifier {
   void _enemyShoot(_Enemy e) {
     switch (e.kind) {
       case _Kind.grunt:
-        eBullets.add(_Bullet(e.x, e.y + 24, 0, 230, 8));
-        e.shootT = 1.8 + _rng.nextDouble() * 1.4;
+        eBullets.add(_Bullet(e.x, e.y + 24, 0, 230 * _bulletMul, 8));
+        e.shootT = (1.8 + _rng.nextDouble() * 1.4) * _shootMul;
         break;
       case _Kind.heavy:
         for (final a in [-0.25, 0.0, 0.25]) {
-          eBullets.add(_Bullet(e.x, e.y + 30, sin(a) * 210, cos(a) * 210, 8));
+          eBullets.add(_Bullet(e.x, e.y + 30, sin(a) * 210 * _bulletMul,
+              cos(a) * 210 * _bulletMul, 8));
         }
-        e.shootT = 2.2 + _rng.nextDouble();
+        e.shootT = (2.2 + _rng.nextDouble()) * _shootMul;
         break;
       case _Kind.boss:
-        for (int i = -2; i <= 2; i++) {
+        final spread = level >= 15 ? 3 : 2;
+        for (int i = -spread; i <= spread; i++) {
           final a = i * 0.25;
-          eBullets.add(_Bullet(e.x, e.y + 60, sin(a) * 220, cos(a) * 220, 10));
+          eBullets.add(_Bullet(e.x, e.y + 60, sin(a) * 220 * _bulletMul,
+              cos(a) * 220 * _bulletMul, 10));
         }
         final dx = px - e.x;
         final dy = py - e.y;
         final d = max(1.0, sqrt(dx * dx + dy * dy));
-        eBullets.add(_Bullet(e.x, e.y + 60, dx / d * 260, dy / d * 260, 10));
-        e.shootT = 1.3;
+        eBullets.add(_Bullet(e.x, e.y + 60, dx / d * 260 * _bulletMul,
+            dy / d * 260 * _bulletMul, 10));
+        e.shootT = max(0.8, 1.3 - level * 0.02);
         break;
       case _Kind.fast:
         break;
@@ -288,12 +356,12 @@ class _CombatGame extends ChangeNotifier {
   }
 
   void _explodeMissile(_Missile m, _Enemy hit) {
-    hit.hp -= 12;
+    hit.hp -= plane.missileDmg;
     for (final e in enemies) {
       if (e == hit) continue;
       final dx = e.x - m.x;
       final dy = e.y - m.y;
-      if (sqrt(dx * dx + dy * dy) < 70) e.hp -= 6;
+      if (sqrt(dx * dx + dy * dy) < 70) e.hp -= plane.missileDmg / 2;
     }
     fx.add(_Fx(m.x, m.y, 0.5, 40));
   }
@@ -321,9 +389,15 @@ class _CombatGame extends ChangeNotifier {
     // player fire
     fireT -= dt;
     if (fireT <= 0) {
-      fireT = firing ? 0.09 : 0.17;
-      pBullets.add(_Bullet(px - 12, py - 30, 0, -640, 1));
-      pBullets.add(_Bullet(px + 12, py - 30, 0, -640, 1));
+      fireT = (firing ? 0.09 : 0.17) * plane.fireMul;
+      if (plane.shots >= 3) {
+        pBullets.add(_Bullet(px - 14, py - 28, -70, -630, 1));
+        pBullets.add(_Bullet(px, py - 34, 0, -640, 1));
+        pBullets.add(_Bullet(px + 14, py - 28, 70, -630, 1));
+      } else {
+        pBullets.add(_Bullet(px - 12, py - 30, 0, -640, 1));
+        pBullets.add(_Bullet(px + 12, py - 30, 0, -640, 1));
+      }
     }
 
     // bullets
@@ -380,7 +454,7 @@ class _CombatGame extends ChangeNotifier {
         }
       }
     }
-    pBullets.removeWhere((b) => b.y < -30);
+    pBullets.removeWhere((b) => b.y < -30 || b.x < -30 || b.x > kW + 30);
 
     // enemy bullets hit player
     for (final b in eBullets) {
@@ -462,20 +536,23 @@ class _CombatGame extends ChangeNotifier {
 }
 
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key});
+  final int level;
+  const GameScreen({super.key, this.level = 1});
   @override
   State<GameScreen> createState() => _GameScreenState();
 }
 
 class _GameScreenState extends State<GameScreen>
     with SingleTickerProviderStateMixin {
-  final _CombatGame g = _CombatGame();
+  late final _CombatGame g;
   late final Ticker _ticker;
   Duration _last = Duration.zero;
 
   @override
   void initState() {
     super.initState();
+    final idx = Wallet.instance.selectedPlane;
+    g = _CombatGame(widget.level, kPlanes[idx < kPlanes.length ? idx : 0]);
     _ticker = createTicker((elapsed) {
       final dt =
           ((elapsed - _last).inMicroseconds / 1000000.0).clamp(0.0, 0.05);
@@ -505,7 +582,7 @@ class _GameScreenState extends State<GameScreen>
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onPanUpdate: (d) => g.move(d.delta.dx * s, d.delta.dy * s),
-                child: CustomPaint(painter: _CombatPainter(g, c.primary)),
+                child: CustomPaint(painter: _CombatPainter(g)),
               ),
             ),
             Positioned.fill(
@@ -570,7 +647,7 @@ class _GameScreenState extends State<GameScreen>
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _chip('Wave ${g.wave}'),
+                      _chip('Lv ${g.level}  W ${g.wave}/${g.totalWaves}'),
                       _chip('Score ${g.score}'),
                       _chip('\u{1F48E} ${g.collected}'),
                     ],
@@ -584,7 +661,7 @@ class _GameScreenState extends State<GameScreen>
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: LinearProgressIndicator(
-                            value: g.hp / 100,
+                            value: g.hp / g.maxHp,
                             minHeight: 12,
                             backgroundColor: Colors.white.withOpacity(0.5),
                             color: g.hp > 30
@@ -594,7 +671,8 @@ class _GameScreenState extends State<GameScreen>
                         ),
                       ),
                       const SizedBox(width: 6),
-                      Text('${g.hp}%', style: whiteBold),
+                      Text('${(g.hp * 100 / g.maxHp).round()}%',
+                          style: whiteBold),
                     ],
                   ),
                   if (boss != null)
@@ -704,7 +782,7 @@ class _GameScreenState extends State<GameScreen>
           ),
         ),
         if (g.banner > 0) Center(child: Text(g.bannerText, style: bigStyle)),
-        if (g.wave == 1 && g.banner > 0)
+        if (g.level == 1 && g.t < 3 && !g.over)
           Align(
             alignment: const Alignment(0, 0.3),
             child: Text('Drag to fly. Auto-fire is on.',
@@ -719,6 +797,8 @@ class _GameScreenState extends State<GameScreen>
   }
 
   Widget _gameOver(BuildContext context) {
+    final win = g.won;
+    final hasNext = win && g.level < kLevelCount;
     return Positioned.fill(
       child: Container(
         color: Colors.black.withOpacity(0.55),
@@ -733,11 +813,22 @@ class _GameScreenState extends State<GameScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Game Over',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
-              const SizedBox(height: 12),
-              Text('Wave reached: ${g.wave}',
-                  style: const TextStyle(fontSize: 18)),
+              Text(win ? 'Level Complete!' : 'Game Over',
+                  style: const TextStyle(
+                      fontSize: 28, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 8),
+              if (win)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (int i = 1; i <= 3; i++)
+                      Icon(i <= g.stars ? Icons.star : Icons.star_border,
+                          color: Colors.amber, size: 36),
+                  ],
+                ),
+              const SizedBox(height: 8),
+              Text('Level ${g.level}  \u2022  Wave ${g.wave}/${g.totalWaves}',
+                  style: const TextStyle(fontSize: 17)),
               const SizedBox(height: 6),
               Text('Score: ${g.score}', style: const TextStyle(fontSize: 18)),
               const SizedBox(height: 6),
@@ -753,13 +844,16 @@ class _GameScreenState extends State<GameScreen>
                   onPressed: () => Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => const GameScreen())),
-                  child: const Text('Play again'),
+                          builder: (_) => GameScreen(
+                              level: hasNext ? g.level + 1 : g.level))),
+                  child: Text(hasNext
+                      ? 'Next level'
+                      : (win ? 'Play again' : 'Try again')),
                 ),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Home'),
+                child: const Text('Levels'),
               ),
             ],
           ),
@@ -771,8 +865,7 @@ class _GameScreenState extends State<GameScreen>
 
 class _CombatPainter extends CustomPainter {
   final _CombatGame g;
-  final Color playerColor;
-  _CombatPainter(this.g, this.playerColor) : super(repaint: g);
+  _CombatPainter(this.g) : super(repaint: g);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -812,16 +905,16 @@ class _CombatPainter extends CustomPainter {
     for (final e in g.enemies) {
       switch (e.kind) {
         case _Kind.grunt:
-          _plane(canvas, Offset(e.x, e.y), 0.6, const Color(0xFFD63031), pi);
+          drawPlane(canvas, Offset(e.x, e.y), 0.6, const Color(0xFFD63031), pi);
           break;
         case _Kind.fast:
-          _plane(canvas, Offset(e.x, e.y), 0.5, const Color(0xFFE17055), pi);
+          drawPlane(canvas, Offset(e.x, e.y), 0.5, const Color(0xFFE17055), pi);
           break;
         case _Kind.heavy:
-          _plane(canvas, Offset(e.x, e.y), 0.8, const Color(0xFF2D3436), pi);
+          drawPlane(canvas, Offset(e.x, e.y), 0.8, const Color(0xFF2D3436), pi);
           break;
         case _Kind.boss:
-          _plane(canvas, Offset(e.x, e.y), 1.5, const Color(0xFF8E0000), pi);
+          drawPlane(canvas, Offset(e.x, e.y), 1.5, const Color(0xFF8E0000), pi);
           break;
       }
     }
@@ -879,7 +972,7 @@ class _CombatPainter extends CustomPainter {
             height: flame),
         Paint()..color = const Color(0xFFFFA726).withOpacity(0.9),
       );
-      _plane(canvas, Offset(g.px, g.py), 0.9, playerColor, 0);
+      drawPlane(canvas, Offset(g.px, g.py), 0.9, g.plane.color, 0);
     }
     if (g.shieldLeft > 0) {
       canvas.drawCircle(Offset(g.px, g.py), 58,
@@ -932,70 +1025,6 @@ class _CombatPainter extends CustomPainter {
       ..lineTo(x, y - 14)
       ..close();
     canvas.drawPath(top, Paint()..color = const Color(0xFF74B9FF));
-  }
-
-  void _plane(Canvas canvas, Offset c, double s, Color color, double rot) {
-    canvas.save();
-    canvas.translate(c.dx, c.dy);
-    if (rot != 0) canvas.rotate(rot);
-    canvas.scale(s);
-    canvas.translate(-50, -50);
-
-    final fill = Paint()..color = color;
-    final edge = Paint()
-      ..color = Colors.black.withOpacity(0.18)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-
-    final wings = Path()
-      ..moveTo(46, 40)
-      ..lineTo(6, 68)
-      ..lineTo(6, 75)
-      ..lineTo(46, 62)
-      ..close()
-      ..moveTo(54, 40)
-      ..lineTo(94, 68)
-      ..lineTo(94, 75)
-      ..lineTo(54, 62)
-      ..close();
-    canvas.drawPath(wings, fill);
-    canvas.drawPath(wings, edge);
-
-    final tail = Path()
-      ..moveTo(47, 80)
-      ..lineTo(32, 92)
-      ..lineTo(32, 97)
-      ..lineTo(48, 92)
-      ..close()
-      ..moveTo(53, 80)
-      ..lineTo(68, 92)
-      ..lineTo(68, 97)
-      ..lineTo(52, 92)
-      ..close();
-    canvas.drawPath(tail, fill);
-    canvas.drawPath(tail, edge);
-
-    final body = Path()
-      ..moveTo(50, 2)
-      ..cubicTo(57, 20, 57, 42, 55, 64)
-      ..lineTo(55, 86)
-      ..lineTo(45, 86)
-      ..lineTo(45, 64)
-      ..cubicTo(43, 42, 43, 20, 50, 2)
-      ..close();
-    canvas.drawPath(body, Paint()..color = Colors.white);
-    canvas.drawPath(body, edge);
-
-    canvas.drawOval(
-      Rect.fromCenter(center: const Offset(50, 24), width: 9, height: 18),
-      Paint()..color = const Color(0xFF74B9FF),
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-          const Rect.fromLTWH(47, 44, 6, 14), const Radius.circular(3)),
-      fill,
-    );
-    canvas.restore();
   }
 
   @override
