@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/wallet.dart';
 import '../services/theme_controller.dart';
 
@@ -26,12 +27,56 @@ class ProfileScreen extends StatelessWidget {
               child: Row(children: [
                 const CircleAvatar(radius: 32, child: Icon(Icons.person, size: 36)),
                 const SizedBox(width: 16),
-                Text(w.premiumBadge ? 'Player  \u2713 Premium' : 'Player',
-                    style: const TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.w900)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(w.premiumBadge ? 'Player  \u2713 Premium' : 'Player',
+                          style: const TextStyle(
+                              fontSize: 22, fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 4),
+                      Row(children: [
+                        Text('UID: ${w.uid}',
+                            style: const TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.w600)),
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () {
+                            Clipboard.setData(ClipboardData(text: w.uid));
+                            _snack(context, 'UID copied');
+                          },
+                          child: const Padding(
+                            padding: EdgeInsets.all(4),
+                            child: Icon(Icons.copy, size: 18),
+                          ),
+                        ),
+                      ]),
+                    ],
+                  ),
+                ),
               ]),
             ),
             const SizedBox(height: 16),
+            _tile(context, Icons.badge, 'Change UID',
+                'Get a new UID by reinstalling the app', () {
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Change your UID'),
+                  content: const Text(
+                      'Your UID is created when the app is first opened on '
+                      'this phone. To get a new UID, uninstall the app and '
+                      'install it again from Google Play.\n\n'
+                      'Note: diamonds, planes and level progress on this '
+                      'phone will be reset too.'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('OK')),
+                  ],
+                ),
+              );
+            }),
             _tile(context, Icons.card_giftcard, 'Daily Rewards',
                 w.canClaimDaily
                     ? 'Claim today\'s reward (7-day streak)'
