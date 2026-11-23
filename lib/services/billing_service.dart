@@ -15,7 +15,6 @@ const Map<String, int> kDiamondPackages = {
   'diamond_210': 210,
   'diamond_300': 300,
   'diamond_310': 310,
-  'diamond_310': 310,
   'diamond_400': 400,
   'diamond_410': 410,
   'diamond_500': 500,
